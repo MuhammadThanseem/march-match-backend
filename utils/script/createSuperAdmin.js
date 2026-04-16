@@ -1,52 +1,42 @@
-// scripts/createSuperAdmin.js
-require("dotenv").config();
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const User = require("../../models/User");
 
-// MongoDB connection
-const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/userdb";
-
-mongoose
-  .connect(MONGO_URI, {})
-  .then(() => console.log("MongoDB connected"))
-  .catch((err) => console.error("MongoDB connection error:", err));
-
-async function createSuperAdmin() {
+const ensureSuperAdmin = async () => {
   try {
-    const email = "superadmin@example.com"; // change email
-    const mobile = "9999999999"; // optional mobile
-    const password = "SuperAdmin@123"; // change password
-    const name = "Super Admin";
-    const username = "superadmin";
+    const email = process.env.ADMIN_EMAIL || "superadmin@example.com";
+    const mobile = process.env.ADMIN_MOBILE || "9999999999";
+    const username = process.env.ADMIN_USERNAME || "superadmin";
 
-    // Check if superadmin already exists
-    const existing = await User.findOne({ email });
+    const existing = await User.findOne({
+      $or: [{ email }, { mobile }, { username }],
+    });
+
     if (existing) {
-      console.log("Superadmin already exists!");
-      process.exit(0);
+      console.log("👑 Superadmin already exists");
+      return;
     }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(
+      process.env.ADMIN_PASSWORD || "SuperAdmin@123",
+      10,
+    );
 
-    // Create superadmin
     const superadmin = new User({
-      name,
+      name: "Super Admin",
       email,
       mobile,
+      username,
       password: hashedPassword,
       role: "superadmin",
-      username,
     });
 
     await superadmin.save();
-    console.log("Superadmin created successfully!");
-    process.exit(0);
-  } catch (error) {
-    console.error("Error creating superadmin:", error);
-    process.exit(1);
-  }
-}
 
-createSuperAdmin();
+    console.log("🔥 Superadmin created successfully!");
+  } catch (error) {
+    console.error("❌ Error creating superadmin:", error);
+  }
+};
+
+module.exports = ensureSuperAdmin;

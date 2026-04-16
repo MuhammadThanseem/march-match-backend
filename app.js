@@ -2,8 +2,10 @@ const express = require("express");
 const dotenv = require("dotenv");
 const cors = require("cors");
 const bodyParser = require("body-parser");
+
 const connectDB = require("./config/database");
 const startGameScheduler = require("./utils/scheduler");
+const createSuperAdmin = require("./utils/script/createSuperAdmin");
 
 console.log("🔄 Loading environment variables...");
 dotenv.config();
@@ -13,7 +15,7 @@ console.log("🚀 Initializing Express app...");
 const app = express();
 
 // CORS Setup
-const allowedOrigin = process.env.CLIENT_URL || "http://localhost:3000";
+const allowedOrigin = process.env.CLIENT_URL || "*";
 console.log("🌐 CORS allowed origin:", allowedOrigin);
 
 app.use(
@@ -30,19 +32,11 @@ console.log("📦 Setting up middlewares...");
 app.use(bodyParser.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Request Logger (VERY USEFUL 🔥)
+// Request Logger
 app.use((req, res, next) => {
   console.log(`📡 ${req.method} ${req.url}`);
   next();
 });
-
-// Connect DB
-console.log("🛢️ Connecting to database...");
-connectDB();
-
-// Start Game Scheduler
-console.log("⏰ Starting game scheduler...");
-startGameScheduler();
 
 // Routes
 console.log("🛣️ Registering routes...");
@@ -65,12 +59,42 @@ console.log("✔️ /api/wallet loaded");
 app.use("/api/checkpoints", require("./routes/checkpointRoutes"));
 console.log("✔️ /api/checkpoints loaded");
 
-// Start Server
-const PORT = process.env.PORT || 5000;
-
-app.listen(PORT, () => {
-  console.log("=================================");
-  console.log(`✅ Server running on port ${PORT}`);
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
-  console.log("=================================");
+// Health check route (IMPORTANT for Render)
+app.get("/", (req, res) => {
+  res.send("✅ API is running...");
 });
+
+// ================= START SERVER =================
+
+const startServer = async () => {
+  try {
+    // 1. Connect DB
+    console.log("🛢️ Connecting to database...");
+    await connectDB();
+    console.log("✅ MongoDB Connected");
+
+    // 2. Ensure Super Admin
+    console.log("👑 Checking Super Admin...");
+    await createSuperAdmin();
+
+    // 3. Start Scheduler
+    console.log("⏰ Starting game scheduler...");
+    startGameScheduler();
+
+    // 4. Start Server
+    const PORT = process.env.PORT || 5000;
+
+    app.listen(PORT, () => {
+      console.log("=================================");
+      console.log(`✅ Server running on port ${PORT}`);
+      console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
+      console.log("=================================");
+    });
+
+  } catch (err) {
+    console.error("❌ Startup error:", err);
+    process.exit(1);
+  }
+};
+
+startServer();
