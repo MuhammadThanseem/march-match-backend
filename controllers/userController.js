@@ -101,6 +101,32 @@ class UserController {
       });
     }
   }
+  async getUserStats(req, res) {
+    try {
+      // 🔐 assuming userId comes from auth middleware
+      const userId = req.user?.id || req.params.userId;
+
+      if (!userId) {
+        return res.status(400).json({
+          message: "User ID is required",
+        });
+      }
+
+      const stats = await userService.getUserStats(userId);
+
+      return res.status(200).json({
+        success: true,
+        data: stats,
+      });
+    } catch (error) {
+      console.error("Get User Stats Error:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch user stats",
+      });
+    }
+  }
 }
 
 module.exports = new UserController();

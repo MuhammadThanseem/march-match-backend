@@ -9,5 +9,6 @@ router.post("/login", userController.login);
 
 // Protected route example
 router.put("/:id", auth, userController.updateUser);
+router.get("/stats", auth, userController.getUserStats);
 
 module.exports = router;

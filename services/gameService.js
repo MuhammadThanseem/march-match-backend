@@ -161,49 +161,71 @@ class GameService {
   // ✅ Join Game
   // ===============================
   async joinGame(gameId, userId) {
+    // ✅ Prevent duplicate join
     const existing = await GameEntry.findOne({ gameId, userId });
     if (existing) return existing;
 
     const game = await Game.findById(gameId);
     if (!game) throw new Error("Game not found");
 
+    // ⚠️ This is NOT reliable alone, but keep for early rejection
     const count = await GameEntry.countDocuments({ gameId });
     if (count >= game.totalSlots) throw new Error("Game full");
 
+    // 💰 Deduct money first
     const wallet = await WalletService.gameEntry(
       userId,
       game.entryFee,
       `${game.teamAName} vs ${game.teamBName}`,
     );
 
-    const entries = await GameEntry.find({ gameId });
-    const usedNumbers = entries.map((e) => e.assignedNumber);
+    // 🔁 Retry loop (IMPORTANT)
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        const entries = await GameEntry.find({ gameId });
+        const usedNumbers = entries.map((e) => e.assignedNumber);
 
-    let assignedNumber = null;
-    for (let i = 0; i < 10; i++) {
-      if (!usedNumbers.includes(i)) {
-        assignedNumber = i;
-        break;
+        let assignedNumber = null;
+        for (let i = 0; i < 10; i++) {
+          if (!usedNumbers.includes(i)) {
+            assignedNumber = i;
+            break;
+          }
+        }
+
+        // 🚫 No numbers left
+        if (assignedNumber === null) {
+          throw new Error("Game full");
+        }
+
+        const entry = await GameEntry.create({
+          gameId,
+          userId,
+          assignedNumber,
+        });
+
+        await History.create({
+          gameId,
+          entries: [entry._id],
+          action: "joined",
+          user: userId,
+          amount: game.entryFee,
+          balanceAfter: wallet.balance,
+          assignedNumber,
+        });
+
+        return entry;
+      } catch (err) {
+        // 🔁 Handle duplicate number OR duplicate user
+        if (err.code === 11000) {
+          continue;
+        }
+
+        throw err;
       }
     }
 
-    const entry = await GameEntry.create({
-      gameId,
-      userId,
-      assignedNumber,
-    });
-
-    await History.create({
-      gameId,
-      entries: [entry._id],
-      action: "joined",
-      user: userId,
-      amount: game.entryFee,
-      balanceAfter: wallet.balance,
-      assignedNumber,
-    });
-
-    return entry;
+    throw new Error("Could not join game, please try again");
   }
 
   // ===============================

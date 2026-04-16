@@ -1,5 +1,7 @@
 const User = require("../models/User");
 const bcrypt = require("bcryptjs");
+const GameEntry = require("../models/Entry");
+const Checkpoint = require("../models/CheckPoint");
 
 class UserService {
   // Create new user
