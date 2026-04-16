@@ -118,23 +118,36 @@ class WalletService {
     return wallet;
   }
 
- async addWinning(userId, amount, matchName, isFinal = true, winningNumber = null) {
+  async addWinning(
+    userId,
+    amount,
+    matchName,
+    type = "timeout",
+    winningNumber = null,
+    checkpointId = null,
+  ) {
     const wallet = await Wallet.findOne({ user: userId });
-
     if (!wallet) throw new Error("Wallet not found");
 
     wallet.balance += amount;
     await wallet.save();
 
+    let txType = "win_timeout";
+    if (type === "halftime") txType = "win_half";
+    if (type === "final") txType = "win_final";
+
     await Transaction.create({
       user: userId,
-      type: isFinal ? "win_final" : "win_half",
+      type: txType,
       amount,
       balanceAfter: wallet.balance,
       status: "completed",
-      title: isFinal ? "Game Winnings (Final)" : "Game Winnings (Half)",
+      title: `Game Winnings (${type})`,
       subtitle: matchName,
-      winningNumber
+      winningNumber,
+      metadata: {
+        checkpointId,
+      },
     });
 
     return wallet;

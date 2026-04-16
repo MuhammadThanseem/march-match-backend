@@ -91,7 +91,7 @@ const getUserGameHistory = async (userId) => {
 
       checkpointsData.push({
         label,
-        amount: isWin ? cp.amount : 0,
+        amount: isWin ? cp.rewardAmount || 0 : 0,
         win: isWin,
       });
     });

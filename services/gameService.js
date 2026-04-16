@@ -161,71 +161,91 @@ class GameService {
   // ✅ Join Game
   // ===============================
   async joinGame(gameId, userId) {
-    // ✅ Prevent duplicate join
-    const existing = await GameEntry.findOne({ gameId, userId });
-    if (existing) return existing;
+    const session = await mongoose.startSession();
 
-    const game = await Game.findById(gameId);
-    if (!game) throw new Error("Game not found");
+    try {
+      let resultEntry = null;
 
-    // ⚠️ This is NOT reliable alone, but keep for early rejection
-    const count = await GameEntry.countDocuments({ gameId });
-    if (count >= game.totalSlots) throw new Error("Game full");
-
-    // 💰 Deduct money first
-    const wallet = await WalletService.gameEntry(
-      userId,
-      game.entryFee,
-      `${game.teamAName} vs ${game.teamBName}`,
-    );
-
-    // 🔁 Retry loop (IMPORTANT)
-    for (let attempt = 0; attempt < 10; attempt++) {
-      try {
-        const entries = await GameEntry.find({ gameId });
-        const usedNumbers = entries.map((e) => e.assignedNumber);
-
-        let assignedNumber = null;
-        for (let i = 0; i < 10; i++) {
-          if (!usedNumbers.includes(i)) {
-            assignedNumber = i;
-            break;
-          }
+      await session.withTransaction(async () => {
+        // ✅ Check if already joined
+        const existing = await GameEntry.findOne({ gameId, userId }).session(
+          session,
+        );
+        if (existing) {
+          resultEntry = existing;
+          return;
         }
 
-        // 🚫 No numbers left
-        if (assignedNumber === null) {
+        const game = await Game.findById(gameId).session(session);
+        if (!game) throw new Error("Game not found");
+
+        // ✅ Check slot availability (safe inside transaction)
+        const count = await GameEntry.countDocuments({ gameId }).session(
+          session,
+        );
+        if (count >= game.totalSlots) {
           throw new Error("Game full");
         }
 
-        const entry = await GameEntry.create({
-          gameId,
-          userId,
-          assignedNumber,
-        });
+        // 🔁 Retry logic INSIDE transaction
+        for (let attempt = 0; attempt < 10; attempt++) {
+          try {
+            // 🎲 Random number (better for concurrency)
+            const assignedNumber = Math.floor(Math.random() * 10);
 
-        await History.create({
-          gameId,
-          entries: [entry._id],
-          action: "joined",
-          user: userId,
-          amount: game.entryFee,
-          balanceAfter: wallet.balance,
-          assignedNumber,
-        });
+            // 💰 Deduct wallet INSIDE transaction
+            const wallet = await WalletService.gameEntry(
+              userId,
+              game.entryFee,
+              `${game.teamAName} vs ${game.teamBName}`,
+              session, // 👈 pass session
+            );
 
-        return entry;
-      } catch (err) {
-        // 🔁 Handle duplicate number OR duplicate user
-        if (err.code === 11000) {
-          continue;
+            const entry = await GameEntry.create(
+              [
+                {
+                  gameId,
+                  userId,
+                  assignedNumber,
+                },
+              ],
+              { session },
+            );
+
+            await History.create(
+              [
+                {
+                  gameId,
+                  entries: [entry[0]._id],
+                  action: "joined",
+                  user: userId,
+                  amount: game.entryFee,
+                  balanceAfter: wallet.balance,
+                  assignedNumber,
+                },
+              ],
+              { session },
+            );
+
+            resultEntry = entry[0];
+            return;
+          } catch (err) {
+            // 🔁 Duplicate key → retry
+            if (err.code === 11000) continue;
+
+            throw err;
+          }
         }
 
-        throw err;
-      }
-    }
+        throw new Error("Could not assign number, try again");
+      });
 
-    throw new Error("Could not join game, please try again");
+      return resultEntry;
+    } catch (err) {
+      throw err;
+    } finally {
+      session.endSession();
+    }
   }
 
   // ===============================
@@ -357,39 +377,26 @@ class GameService {
       let walletResult = null;
 
       if (winnerEntry) {
-        let txType = "win_timeout";
-        if (checkpoint.type === "halftime") txType = "win_half";
-        if (checkpoint.type === "final") txType = "win_final";
+        if (winnerEntry) {
+          await WalletService.addWinning(
+            winnerEntry.userId,
+            checkpoint.rewardAmount,
+            "",
+            checkpoint.type,
+            winningNumber,
+            checkpoint._id,
+          );
 
-        walletResult = await WalletService.addWinning(
-          winnerEntry.userId,
-          checkpoint.rewardAmount,
-          "",
-          checkpoint.type === "final",
-          winningNumber,
-        );
-
-        await Transaction.create({
-          user: winnerEntry.userId,
-          type: txType,
-          amount: checkpoint.rewardAmount,
-          balanceAfter: walletResult.balance,
-          status: "completed",
-          metadata: {
+          await History.create({
+            gameId,
+            action: "win",
+            user: winnerEntry.userId,
+            amount: checkpoint.rewardAmount,
+            balanceAfter: walletResult.balance,
             checkpointId: checkpoint._id,
             winningNumber,
-          },
-        });
-
-        await History.create({
-          gameId,
-          action: "win",
-          user: winnerEntry.userId,
-          amount: checkpoint.rewardAmount,
-          balanceAfter: walletResult.balance,
-          checkpointId: checkpoint._id,
-          winningNumber,
-        });
+          });
+        }
       }
 
       // ✅ mark completed
@@ -689,10 +696,16 @@ class GameService {
 
     // 5. Merge
     return checkpoints.map((cp, index) => {
-      const isCompleted = cp.status === "completed";
+      const isCompleted = cp.endTime <= Date.now();
       const isActive = index === activeIndex;
 
       const score = scoreMap.get(cp._id.toString());
+      let winningNumber = null;
+
+      if (isCompleted && score) {
+        const total = (score.teamAScore || 0) + (score.teamBScore || 0);
+        winningNumber = total % 10;
+      }
 
       return {
         _id: cp._id,
@@ -705,7 +718,7 @@ class GameService {
 
         teamAScore: isCompleted ? score?.teamAScore || 0 : 0,
         teamBScore: isCompleted ? score?.teamBScore || 0 : 0,
-        winningNumber: isCompleted ? (cp.winningNumber ?? null) : null,
+        winningNumber: winningNumber,
 
         startTime: cp.startTime,
         endTime: cp.endTime,
