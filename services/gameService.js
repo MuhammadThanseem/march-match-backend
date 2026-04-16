@@ -377,26 +377,24 @@ class GameService {
       let walletResult = null;
 
       if (winnerEntry) {
-        if (winnerEntry) {
-          await WalletService.addWinning(
-            winnerEntry.userId,
-            checkpoint.rewardAmount,
-            "",
-            checkpoint.type,
-            winningNumber,
-            checkpoint._id,
-          );
+        walletResult = await WalletService.addWinning(
+          winnerEntry.userId,
+          checkpoint.rewardAmount,
+          "",
+          checkpoint.type,
+          winningNumber,
+          checkpoint._id,
+        );
 
-          await History.create({
-            gameId,
-            action: "win",
-            user: winnerEntry.userId,
-            amount: checkpoint.rewardAmount,
-            balanceAfter: walletResult.balance,
-            checkpointId: checkpoint._id,
-            winningNumber,
-          });
-        }
+        await History.create({
+          gameId,
+          action: "win",
+          user: winnerEntry.userId,
+          amount: checkpoint.rewardAmount,
+          balanceAfter: walletResult.balance, // ✅ now valid
+          checkpointId: checkpoint._id,
+          winningNumber,
+        });
       }
 
       // ✅ mark completed
