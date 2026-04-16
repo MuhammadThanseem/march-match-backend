@@ -4,7 +4,7 @@ const Checkpoint = require("../models/CheckPoint");
 const History = require("../models/History");
 const Score = require("../models/Score");
 const WalletService = require("./walletService");
-const Transaction = require("../models/Transaction");
+const mongoose = require("mongoose");
 
 class GameService {
   constructor() {
