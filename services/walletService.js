@@ -155,7 +155,7 @@ class WalletService {
 
   async getRecentPayouts(limit = 10) {
     const payouts = await Transaction.find({
-      type: { $in: ["win_final", "win_half"] },
+      type: { $in: ["win_final", "win_half", "win_timeout"] },
       status: "completed",
     })
       .sort({ createdAt: -1 })
@@ -166,7 +166,7 @@ class WalletService {
     return payouts.map((tx) => ({
       id: tx._id,
       user: tx.user?.name || "User",
-      label: tx.subtitle || "Match",
+      label: tx.title || "Match",
       stage: tx.type === "win_final" ? "Final" : "Half",
       amount: tx.amount,
       createdAt: tx.createdAt,

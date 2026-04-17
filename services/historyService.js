@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const History = require("../models/History");
 const Checkpoint = require("../models/CheckPoint");
 
@@ -5,6 +6,7 @@ const getUserGameHistory = async (userId) => {
   const histories = await History.find({ user: userId })
     .populate({
       path: "gameId",
+      match: { status: "completed" }, // ✅ ONLY completed games
       select: "teamAName teamBName teamAScore teamBScore startTime status",
     })
     .populate({
@@ -16,6 +18,7 @@ const getUserGameHistory = async (userId) => {
   const grouped = {};
 
   for (const h of histories) {
+    // ✅ Skip non-completed games (gameId will be null if not matched)
     if (!h.gameId) continue;
 
     const gameId = h.gameId._id.toString();
@@ -28,15 +31,14 @@ const getUserGameHistory = async (userId) => {
         score: `${h.gameId.teamAScore || 0}-${h.gameId.teamBScore || 0}`,
         startTime: h.gameId.startTime,
 
-        yourNumber: null, // set later safely
-
+        yourNumber: null,
         entry: 0,
         amount: 0,
         checkpoints: [],
       };
     }
 
-    // ✅ CAPTURE assigned number ONLY from joined
+    // ✅ JOINED
     if (h.action === "joined") {
       grouped[gameId].entry += h.amount || 0;
 
@@ -45,20 +47,33 @@ const getUserGameHistory = async (userId) => {
       }
     }
 
-    // WIN
+    // ✅ WIN
     if (h.action === "win") {
       grouped[gameId].amount += h.amount || 0;
     }
   }
 
-  // ✅ FETCH CHECKPOINTS FOR ALL GAMES
   const gameIds = Object.keys(grouped);
 
+  // 🚫 No completed games → return early
+  if (!gameIds.length) {
+    return {
+      summary: {
+        totalWinnings: 0,
+        gamesPlayed: 0,
+        winRate: 0,
+        bestHit: 0,
+      },
+      games: [],
+    };
+  }
+
+  // ✅ FETCH CHECKPOINTS
   const checkpoints = await Checkpoint.find({
     gameId: { $in: gameIds },
   }).lean();
 
-  // ✅ GROUP CHECKPOINTS BY GAME
+  // ✅ GROUP CHECKPOINTS
   const cpMap = {};
   checkpoints.forEach((cp) => {
     const gid = cp.gameId.toString();
@@ -66,7 +81,7 @@ const getUserGameHistory = async (userId) => {
     cpMap[gid].push(cp);
   });
 
-  // ✅ ATTACH CHECKPOINT DATA
+  // ✅ BUILD RESPONSE
   let games = Object.values(grouped).map((g) => {
     const cps = cpMap[g.gameId] || [];
 
@@ -78,9 +93,7 @@ const getUserGameHistory = async (userId) => {
 
       if (isWin) wonCount++;
 
-      // ✅ LABEL LOGIC
       let label = "";
-
       if (cp.type === "final") {
         label = "Final Score";
       } else if (cp.type === "halftime") {
@@ -111,15 +124,17 @@ const getUserGameHistory = async (userId) => {
     };
   });
 
-  // SORT
+  // ✅ SORT
   games.sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
 
-  // SUMMARY
+  // ✅ SUMMARY
   const totalWinnings = games.reduce((sum, g) => sum + g.amount, 0);
   const gamesPlayed = games.length;
   const wins = games.filter((g) => g.win).length;
 
-  const winRate = gamesPlayed ? Math.round((wins / gamesPlayed) * 100) : 0;
+  const winRate = gamesPlayed
+    ? Math.round((wins / gamesPlayed) * 100)
+    : 0;
 
   const bestHit = Math.max(...games.map((g) => g.amount), 0);
 
