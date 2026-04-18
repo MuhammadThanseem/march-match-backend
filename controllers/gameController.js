@@ -137,3 +137,41 @@ exports.getWinners = async (req, res) => {
     });
   }
 };
+
+exports.getGameFullDetails = async (req, res) => {
+  try {
+    const id = req.params.gameId;
+
+    const data = await gameService.getGameFullDetails(id);
+
+    res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (err) {
+    console.error("Get Game Details Error:", err);
+    res.status(500).json({
+      success: false,
+      message: err.message || "Failed to fetch game details",
+    });
+  }
+};
+
+exports.updateGame = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const updated = await gameService.updateGame(id, req.body);
+
+    res.json({
+      success: true,
+      data: updated,
+    });
+  } catch (err) {
+    console.error("Update Game Error:", err);
+    res.status(500).json({
+      success: false,
+      message: err.message || "Update failed",
+    });
+  }
+};

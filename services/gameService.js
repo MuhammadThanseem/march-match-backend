@@ -753,6 +753,155 @@ class GameService {
       };
     });
   }
+  async getGameFullDetails(gameId) {
+    // 1️⃣ Get Game
+    const game = await Game.findById(gameId).lean();
+    if (!game) throw new Error("Game not found");
+
+    // 2️⃣ Get all checkpoints
+    const checkpoints = await Checkpoint.find({ gameId })
+      .sort({ sequence: 1 })
+      .lean();
+
+    // 3️⃣ Get all scores mapped by checkpoint
+    const scores = await Score.find({ gameId }).lean();
+
+    const scoreMap = {};
+    scores.forEach((s) => {
+      scoreMap[s.checkpointId?.toString()] = s;
+    });
+
+    // 4️⃣ Attach score to each checkpoint
+    const checkpointsWithScores = checkpoints.map((cp) => ({
+      ...cp,
+      score: scoreMap[cp._id.toString()] || null,
+    }));
+
+    // 5️⃣ Find current checkpoint
+    let currentCheckpoint = null;
+
+    const now = new Date();
+
+    currentCheckpoint =
+      checkpoints.find(
+        (cp) =>
+          cp.status === "processing" ||
+          (cp.startTime &&
+            cp.endTime &&
+            now >= cp.startTime &&
+            now <= cp.endTime),
+      ) || null;
+
+    // fallback → first pending
+    if (!currentCheckpoint) {
+      currentCheckpoint = checkpoints.find((cp) => cp.status === "pending");
+    }
+
+    return {
+      game,
+      checkpoints: checkpointsWithScores,
+      currentCheckpoint,
+    };
+  }
+
+  // ===============================
+  // ✅ Update Game + Scores
+  // ===============================
+  async updateGame(gameId, data) {
+    const {
+      title,
+      teamAName,
+      teamBName,
+      league,
+      entryFee,
+      totalSlots,
+      startTime,
+      status,
+      teamAScore,
+      teamBScore,
+      scores = [],
+    } = data;
+
+    // ===============================
+    // ✅ FIND GAME
+    // ===============================
+    const game = await Game.findById(gameId);
+    if (!game) throw new Error("Game not found");
+
+    // ===============================
+    // ✅ UPDATE BASIC FIELDS
+    // ===============================
+    if (title !== undefined) game.title = title;
+    if (teamAName !== undefined) game.teamAName = teamAName;
+    if (teamBName !== undefined) game.teamBName = teamBName;
+    if (league !== undefined) game.league = league;
+
+    if (entryFee !== undefined) {
+      game.entryFee = Number(entryFee);
+    }
+
+    if (totalSlots !== undefined) {
+      game.totalSlots = Number(totalSlots);
+    }
+
+    // ✅ Recalculate pot safely
+    if (entryFee !== undefined || totalSlots !== undefined) {
+      const fee = Number(entryFee ?? game.entryFee);
+      const slots = Number(totalSlots ?? game.totalSlots);
+      game.potAmount = fee * slots;
+    }
+
+    if (startTime) {
+      game.startTime = new Date(startTime);
+    }
+
+    if (status) {
+      game.status = status;
+    }
+
+    if (teamAScore !== undefined) game.teamAScore = teamAScore;
+    if (teamBScore !== undefined) game.teamBScore = teamBScore;
+
+    await game.save();
+
+    // ===============================
+    // ✅ UPDATE SCORES (CHECKPOINT BASED)
+    // ===============================
+    if (scores.length) {
+      const checkpoints = await Checkpoint.find({ gameId }).lean();
+
+      const checkpointMap = new Map();
+      checkpoints.forEach((c) => {
+        checkpointMap.set(c.sequence, c._id);
+      });
+
+      const bulkOps = scores
+        .map((s) => {
+          const checkpointId = checkpointMap.get(s.sequence);
+          if (!checkpointId) return null;
+
+          return {
+            updateOne: {
+              filter: { gameId, checkpointId },
+              update: {
+                $set: {
+                  teamAScore: Number(s.teamAScore),
+                  teamBScore: Number(s.teamBScore),
+                },
+              },
+              upsert: true, // ✅ create if not exists
+            },
+          };
+        })
+        .filter(Boolean);
+
+      if (bulkOps.length) {
+        await Score.bulkWrite(bulkOps);
+      }
+    }
+
+    return game;
+  }
 }
 
 function getQuarterFromSequence(seq) {

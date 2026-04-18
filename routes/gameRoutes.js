@@ -17,7 +17,15 @@ router.get("/upcoming", auth, controller.getUpcomingGames);
 router.get("/live", auth, controller.getLiveGames);
 router.get("/:gameId", auth, controller.getGame);
 router.get("/:gameId/details", auth, controller.getGameDetails);
+router.get(
+  "/:gameId/full-details",
+  auth,
+  isAdmin,
+  controller.getGameFullDetails,
+);
 router.get("/:id/checkpoints", auth, controller.getCheckpoints);
 router.get("/:id/winners", auth, controller.getWinners);
+
+router.put("/:id", auth, isAdmin, controller.updateGame);
 
 module.exports = router;
