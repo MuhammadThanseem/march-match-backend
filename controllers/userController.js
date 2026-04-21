@@ -62,7 +62,7 @@ class UserController {
 
       // Generate JWT token
       const token = jwt.sign(
-        { id: user._id, email: user.email }, // payload
+        { id: user._id, email: user.email, role: user.role }, // payload
         process.env.JWT_SECRET, // secret key from .env
         { expiresIn: "1d" }, // token expiry
       );
