@@ -84,7 +84,7 @@ async function run() {
     console.log("\n📊 Final Generated Scores:");
     console.table(autoScores);
 
-    const startTime = new Date(Date.now() + 2 * 60 * 1000);
+    const startTime = new Date(Date.now() + 25 * 60 * 1000);
 
     // Force seconds and milliseconds to 0
     startTime.setSeconds(0, 0);
