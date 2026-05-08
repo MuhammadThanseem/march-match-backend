@@ -719,7 +719,6 @@ class GameService {
 
     return checkpoints.map((cp) => {
       const entry = entryMap.get(cp.winningNumber);
-
       return {
         checkpoint: cp.sequence,
         type: cp.type,
@@ -727,6 +726,7 @@ class GameService {
         amount: cp.rewardAmount,
         userId: entry?.userId?._id || null,
         userName: entry?.userId?.name || null,
+        time:cp.endTime
       };
     });
   }
