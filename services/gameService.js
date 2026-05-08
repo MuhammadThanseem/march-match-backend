@@ -126,12 +126,12 @@ class GameService {
 
     for (let i = 1; i <= totalSlots; i++) {
       let type = "timeout";
-      let rewardAmount = 10;
+      let rewardAmount = game.entryFee;
 
       if (i === halfIndex) type = "halftime";
       if (i === totalSlots) {
         type = "final";
-        rewardAmount = 20;
+        rewardAmount = 2 * game.entryFee;
       }
 
       const startTime = new Date(currentStartTime);
