@@ -22,6 +22,7 @@ class GameService {
       league,
       entryFee,
       totalSlots = 10,
+      potAmount,
       startTime,
       status = "upcoming",
       scores = [],
@@ -40,7 +41,7 @@ class GameService {
     const fee = Number(entryFee);
     const slots = Number(totalSlots);
 
-    const potAmount = fee * slots; // ✅ removed hardcoded +10
+    const potAmount = fee * slots * 1.1; // ✅ removed hardcoded +10
 
     // ===============================
     // ✅ CREATE GAME
