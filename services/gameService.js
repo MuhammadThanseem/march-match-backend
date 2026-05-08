@@ -22,7 +22,6 @@ class GameService {
       league,
       entryFee,
       totalSlots = 10,
-      potAmount,
       startTime,
       status = "upcoming",
       scores = [],
