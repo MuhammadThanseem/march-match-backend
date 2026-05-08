@@ -161,91 +161,68 @@ class GameService {
   // ✅ Join Game
   // ===============================
   async joinGame(gameId, userId) {
-    const session = await mongoose.startSession();
+    // ✅ Already joined check
+    const existing = await GameEntry.findOne({ gameId, userId });
 
-    try {
-      let resultEntry = null;
-
-      await session.withTransaction(async () => {
-        // ✅ Check if already joined
-        const existing = await GameEntry.findOne({ gameId, userId }).session(
-          session,
-        );
-        if (existing) {
-          resultEntry = existing;
-          return;
-        }
-
-        const game = await Game.findById(gameId).session(session);
-        if (!game) throw new Error("Game not found");
-
-        // ✅ Check slot availability (safe inside transaction)
-        const count = await GameEntry.countDocuments({ gameId }).session(
-          session,
-        );
-        if (count >= game.totalSlots) {
-          throw new Error("Game full");
-        }
-
-        // 🔁 Retry logic INSIDE transaction
-        for (let attempt = 0; attempt < 10; attempt++) {
-          try {
-            // 🎲 Random number (better for concurrency)
-            const assignedNumber = Math.floor(Math.random() * 10);
-
-            // 💰 Deduct wallet INSIDE transaction
-            const wallet = await WalletService.gameEntry(
-              userId,
-              game.entryFee,
-              `${game.teamAName} vs ${game.teamBName}`,
-              session, // 👈 pass session
-            );
-
-            const entry = await GameEntry.create(
-              [
-                {
-                  gameId,
-                  userId,
-                  assignedNumber,
-                },
-              ],
-              { session },
-            );
-
-            await History.create(
-              [
-                {
-                  gameId,
-                  entries: [entry[0]._id],
-                  action: "joined",
-                  user: userId,
-                  amount: game.entryFee,
-                  balanceAfter: wallet.balance,
-                  assignedNumber,
-                },
-              ],
-              { session },
-            );
-
-            resultEntry = entry[0];
-            return;
-          } catch (err) {
-            // 🔁 Duplicate key → retry
-            if (err.code === 11000) continue;
-
-            throw err;
-          }
-        }
-
-        throw new Error("Could not assign number, try again");
-      });
-
-      return resultEntry;
-    } catch (err) {
-      throw err;
-    } finally {
-      session.endSession();
+    if (existing) {
+      return existing;
     }
+
+    const game = await Game.findById(gameId);
+
+    if (!game) {
+      throw new Error("Game not found");
+    }
+
+    // ✅ Slot count check
+    const count = await GameEntry.countDocuments({ gameId });
+
+    if (count >= game.totalSlots) {
+      throw new Error("Game full");
+    }
+
+    // 🔁 Retry for duplicate assigned number
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        const assignedNumber = Math.floor(Math.random() * 10);
+
+        // 💰 Deduct wallet FIRST
+        const wallet = await WalletService.gameEntry(
+          userId,
+          game.entryFee,
+          `${game.teamAName} vs ${game.teamBName}`,
+        );
+
+        // ✅ Create entry
+        const entry = await GameEntry.create({
+          gameId,
+          userId,
+          assignedNumber,
+        });
+
+        // ✅ Create history
+        await History.create({
+          gameId,
+          entries: [entry._id],
+          action: "joined",
+          user: userId,
+          amount: game.entryFee,
+          balanceAfter: wallet.balance,
+          assignedNumber,
+        });
+
+        return entry;
+      } catch (err) {
+        // 🔁 Retry duplicate assigned number
+        if (err.code === 11000) {
+          continue;
+        }
+
+        throw err;
+      }
+    }
+
+    throw new Error("Could not assign number");
   }
 
   // ===============================
