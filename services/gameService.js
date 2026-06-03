@@ -542,11 +542,81 @@ class GameService {
   }
 
   async getAllGames() {
-    return await Game.find().sort({ createdAt: -1 });
+    const games = await Game.find().sort({ createdAt: -1 }).lean();
+
+    const gameIds = games.map((g) => g._id);
+
+    const entries = await GameEntry.aggregate([
+      {
+        $match: {
+          gameId: { $in: gameIds },
+        },
+      },
+      {
+        $group: {
+          _id: "$gameId",
+          joinedSlots: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const entryMap = new Map();
+
+    entries.forEach((e) => {
+      entryMap.set(e._id.toString(), e.joinedSlots);
+    });
+
+    return games.map((game) => {
+      const joinedSlots = entryMap.get(game._id.toString()) || 0;
+
+      return {
+        ...game,
+        joinedSlots,
+        pendingSlots: Math.max(0, game.totalSlots - joinedSlots),
+      };
+    });
   }
 
   async getUpcomingGames() {
-    return await Game.find({ status: "upcoming" }).sort({ startTime: 1 });
+    const games = await Game.find({ status: "upcoming" })
+      .sort({ startTime: 1 })
+      .lean();
+
+    const gameIds = games.map((g) => g._id);
+
+    // Get joined counts for all games
+    const entries = await GameEntry.aggregate([
+      {
+        $match: {
+          gameId: {
+            $in: gameIds,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: "$gameId",
+          joinedSlots: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const entryMap = new Map();
+
+    entries.forEach((e) => {
+      entryMap.set(e._id.toString(), e.joinedSlots);
+    });
+
+    return games.map((game) => {
+      const joinedSlots = entryMap.get(game._id.toString()) || 0;
+      const pendingSlots = game.totalSlots - joinedSlots;
+
+      return {
+        ...game,
+        joinedSlots,
+        pendingSlots,
+      };
+    });
   }
 
   async getLiveGames() {
@@ -726,7 +796,7 @@ class GameService {
         amount: cp.rewardAmount,
         userId: entry?.userId?._id || null,
         userName: entry?.userId?.name || null,
-        time:cp.endTime
+        time: cp.endTime,
       };
     });
   }
