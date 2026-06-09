@@ -2,6 +2,21 @@ const userService = require("../services/userService");
 const jwt = require("jsonwebtoken");
 const Wallet = require("../models/Wallet");
 const User = require("../models/User");
+const Transaction = require("../models/Transaction");
+
+const buildCsv = (rows, headers) => {
+  const headerLine = headers.map((header) => header.label).join(",");
+  const lines = rows.map((row) =>
+    headers
+      .map((header) => {
+        const value = row[header.key] ?? "";
+        const stringValue = typeof value === "string" ? value : String(value);
+        return `"${stringValue.replace(/"/g, '""')}"`;
+      })
+      .join(","),
+  );
+  return [headerLine, ...lines].join("\n");
+};
 
 class UserController {
   // Register
@@ -131,22 +146,47 @@ class UserController {
 
   async getUserById(req, res) {
     try {
-      const user = await User.findById(req.params.id).select("-password").lean();
+      const user = await User.findById(req.params.id)
+        .select("-password")
+        .lean();
+
       if (!user) {
-        return res.status(404).json({ success: false, message: "User not found" });
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+        });
       }
-      return res.status(200).json({ success: true, data: user });
+
+      const wallet = await Wallet.findOne({ user: user._id })
+        .select("balance")
+        .lean();
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          ...user,
+          balance: wallet?.balance || 0,
+        },
+      });
     } catch (error) {
       console.error("Get User By ID Error:", error);
-      return res.status(500).json({ success: false, message: "Failed to fetch user" });
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch user",
+      });
     }
   }
 
   async getAllUsers(req, res) {
     try {
       const users = await User.find().select("-password").lean();
-      const wallets = await Wallet.find({ user: { $in: users.map((u) => u._id) } }).lean();
-      const walletByUser = new Map(wallets.map((wallet) => [wallet.user.toString(), wallet]));
+      const wallets = await Wallet.find({
+        user: { $in: users.map((u) => u._id) },
+      }).lean();
+      const walletByUser = new Map(
+        wallets.map((wallet) => [wallet.user.toString(), wallet]),
+      );
 
       const data = users.map((user) => ({
         ...user,
@@ -156,7 +196,110 @@ class UserController {
       return res.status(200).json({ success: true, data });
     } catch (error) {
       console.error("Get All Users Error:", error);
-      return res.status(500).json({ success: false, message: "Failed to fetch users" });
+      return res
+        .status(500)
+        .json({ success: false, message: "Failed to fetch users" });
+    }
+  }
+
+  async exportUsersWithTransactions(req, res) {
+    try {
+      const users = await User.find().select("-password").lean();
+      const userIds = users.map((user) => user._id);
+
+      const wallets = await Wallet.find({ user: { $in: userIds } }).lean();
+      const walletByUser = new Map(
+        wallets.map((wallet) => [wallet.user.toString(), wallet]),
+      );
+
+      const transactions = await Transaction.find({ user: { $in: userIds } })
+        .sort({ user: 1, createdAt: -1 })
+        .lean();
+
+      const transactionsByUser = new Map();
+      transactions.forEach((tx) => {
+        const userId = tx.user.toString();
+        if (!transactionsByUser.has(userId)) {
+          transactionsByUser.set(userId, []);
+        }
+        transactionsByUser.get(userId).push(tx);
+      });
+
+      const headers = [
+        { label: "User ID", key: "userId" },
+        { label: "Name", key: "name" },
+        { label: "Email", key: "email" },
+        { label: "Mobile", key: "mobile" },
+        { label: "Username", key: "username" },
+        { label: "Role", key: "role" },
+        { label: "Balance", key: "balance" },
+        { label: "User Created At", key: "createdAt" },
+        { label: "Transaction ID", key: "transactionId" },
+        { label: "Transaction Type", key: "transactionType" },
+        { label: "Transaction Title", key: "transactionTitle" },
+        { label: "Transaction Subtitle", key: "transactionSubtitle" },
+        { label: "Transaction Amount", key: "transactionAmount" },
+        { label: "Transaction Status", key: "transactionStatus" },
+        { label: "Transaction Date", key: "transactionDate" },
+      ];
+
+      const rows = [];
+      users.forEach((user) => {
+        const baseRow = {
+          userId: user._id.toString(),
+          name: user.name || "",
+          email: user.email || "",
+          mobile: user.mobile || "",
+          username: user.username || "",
+          role: user.role || "",
+          balance: walletByUser.get(user._id.toString())?.balance || 0,
+          createdAt: user.createdAt
+            ? new Date(user.createdAt).toISOString()
+            : "",
+        };
+
+        const userTxs = transactionsByUser.get(user._id.toString()) || [];
+        if (userTxs.length === 0) {
+          rows.push({
+            ...baseRow,
+            transactionId: "",
+            transactionType: "",
+            transactionTitle: "",
+            transactionSubtitle: "",
+            transactionAmount: "",
+            transactionStatus: "",
+            transactionDate: "",
+          });
+        } else {
+          userTxs.forEach((tx) => {
+            rows.push({
+              ...baseRow,
+              transactionId: tx._id.toString(),
+              transactionType: tx.type || "",
+              transactionTitle: tx.title || "",
+              transactionSubtitle: tx.subtitle || "",
+              transactionAmount: tx.amount || 0,
+              transactionStatus: tx.status || "",
+              transactionDate: tx.createdAt
+                ? new Date(tx.createdAt).toISOString()
+                : "",
+            });
+          });
+        }
+      });
+
+      const csv = buildCsv(rows, headers);
+      res.setHeader("Content-Type", "text/csv;charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        "attachment; filename=users-transactions-report.csv",
+      );
+      return res.send(csv);
+    } catch (error) {
+      console.error("Export Users With Transactions Error:", error);
+      return res
+        .status(500)
+        .json({ success: false, message: "Failed to export users" });
     }
   }
 }

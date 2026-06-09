@@ -9,6 +9,12 @@ router.post("/login", userController.login);
 
 // Admin routes
 router.get("/all", auth, isAdmin, userController.getAllUsers);
+router.get(
+  "/export/transactions",
+  auth,
+  isAdmin,
+  userController.exportUsersWithTransactions,
+);
 router.get("/stats", auth, userController.getUserStats);
 router.get("/:id", auth, isAdmin, userController.getUserById);
 
