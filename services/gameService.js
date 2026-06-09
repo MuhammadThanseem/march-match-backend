@@ -22,6 +22,7 @@ class GameService {
       league,
       entryFee,
       totalSlots = 10,
+      potAmount,
       startTime,
       status = "upcoming",
       scores = [],
@@ -40,7 +41,7 @@ class GameService {
     const fee = Number(entryFee);
     const slots = Number(totalSlots);
 
-    const potAmount = fee * slots * 1.1; // ✅ removed hardcoded +10
+    const amount = Number(potAmount);
 
     // ===============================
     // ✅ CREATE GAME
@@ -52,7 +53,7 @@ class GameService {
       league,
       entryFee: fee,
       totalSlots: slots,
-      potAmount,
+      potAmount: amount,
       startTime: new Date(startTime),
       status,
     });
@@ -487,6 +488,23 @@ class GameService {
       .sort({ sequence: 1 })
       .lean();
 
+    const joinedSlots = await GameEntry.countDocuments({ gameId });
+    const pendingSlots = Math.max(0, game.totalSlots - joinedSlots);
+    const isFull = joinedSlots >= game.totalSlots;
+
+    let participants = [];
+    if (isFull) {
+      const entries = await GameEntry.find({ gameId })
+        .populate("userId", "name")
+        .sort({ assignedNumber: 1 })
+        .lean();
+
+      participants = entries.map((entry) => ({
+        username: entry.userId?.name || "Unknown",
+        assignedNumber: entry.assignedNumber,
+      }));
+    }
+
     // 🕒 TIMER
     let timeLeft = 0;
     let progress = 0;
@@ -504,6 +522,10 @@ class GameService {
     return {
       game: {
         _id: game._id,
+        joinedSlots,
+        pendingSlots,
+        isFull,
+        participants,
 
         // 🏀 BASIC INFO (needed on first load)
         teamAName: game.teamAName,
@@ -861,6 +883,7 @@ class GameService {
       teamBName,
       league,
       entryFee,
+      potAmount,
       totalSlots,
       startTime,
       status,
@@ -895,7 +918,7 @@ class GameService {
     if (entryFee !== undefined || totalSlots !== undefined) {
       const fee = Number(entryFee ?? game.entryFee);
       const slots = Number(totalSlots ?? game.totalSlots);
-      game.potAmount = fee * slots;
+      game.potAmount = Number(potAmount ?? game.potAmount);
     }
 
     if (startTime) {

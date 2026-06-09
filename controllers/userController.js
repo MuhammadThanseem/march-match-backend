@@ -1,6 +1,7 @@
 const userService = require("../services/userService");
 const jwt = require("jsonwebtoken");
 const Wallet = require("../models/Wallet");
+const User = require("../models/User");
 
 class UserController {
   // Register
@@ -125,6 +126,37 @@ class UserController {
         success: false,
         message: "Failed to fetch user stats",
       });
+    }
+  }
+
+  async getUserById(req, res) {
+    try {
+      const user = await User.findById(req.params.id).select("-password").lean();
+      if (!user) {
+        return res.status(404).json({ success: false, message: "User not found" });
+      }
+      return res.status(200).json({ success: true, data: user });
+    } catch (error) {
+      console.error("Get User By ID Error:", error);
+      return res.status(500).json({ success: false, message: "Failed to fetch user" });
+    }
+  }
+
+  async getAllUsers(req, res) {
+    try {
+      const users = await User.find().select("-password").lean();
+      const wallets = await Wallet.find({ user: { $in: users.map((u) => u._id) } }).lean();
+      const walletByUser = new Map(wallets.map((wallet) => [wallet.user.toString(), wallet]));
+
+      const data = users.map((user) => ({
+        ...user,
+        balance: walletByUser.get(user._id.toString())?.balance || 0,
+      }));
+
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      console.error("Get All Users Error:", error);
+      return res.status(500).json({ success: false, message: "Failed to fetch users" });
     }
   }
 }
